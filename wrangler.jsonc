@@ -8,9 +8,9 @@
   "assets": {
     "directory": "./.generated/assets",
     "binding": "ASSETS",
-    "run_worker_first": true
+    "run_worker_first": ["/_content/*"]
   },
   "kv_namespaces": [
-    { "binding": "OAUTH_KV", "id": "OAUTH_KV" }
+    { "binding": "OAUTH_KV" }
   ]
 }
