@@ -5,21 +5,22 @@ import type { Env } from './types.ts';
 const CLIENT_ID = 'https://chatgpt.com/oauth/client.json';
 const REDIRECT_URI = 'https://chatgpt.com/connector_platform_oauth_redirect';
 const SCOPE = 'skills:read';
-const safeHeaders = { 'cache-control': 'no-store, private', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" };
+const safeHeaders = {
+  'cache-control': 'no-store, private',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+};
 const escape = (value: string) => value.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
 
 export function validConfiguration(env: Env): boolean {
-  if (!env.OAUTH_KV || !env.ASSETS || !env.OWNER_PASSPHRASE || env.OWNER_PASSPHRASE.length < 32 || !env.COOKIE_SECRET || env.COOKIE_SECRET.length < 32) return false;
-  try {
-    const url = new URL(env.PUBLIC_ORIGIN);
-    return !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' && (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) && env.PUBLIC_ORIGIN === url.origin;
-  } catch { return false; }
+  return !!env.OAUTH_KV && !!env.ASSETS && typeof env.OWNER_PASSPHRASE === 'string' && env.OWNER_PASSPHRASE.length >= 32;
 }
 
 async function clientBucket(request: Request, env: Env): Promise<string> {
   const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.COOKIE_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ip));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.OWNER_PASSPHRASE), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`skill2plugin:login:${ip}`));
   return `login:${Array.from(new Uint8Array(digest).slice(0, 16), x => x.toString(16).padStart(2, '0')).join('')}`;
 }
 
@@ -50,42 +51,47 @@ function html(body: string, headers?: Headers): Response {
   return new Response(body, { headers: result });
 }
 
-function providerOptions(env: Env): OAuthProviderOptions<Env> {
+function providerOptions(env: Env, origin: string): OAuthProviderOptions<Env> {
   return {
     apiRoute: '/mcp',
     apiHandler: { async fetch(request, workerEnv, context) {
       const auth = (context as typeof context & { auth?: { audience?: string; scope?: string[]; clientId?: string; expiresAt?: number } }).auth;
       if (!auth) return new Response('Unauthorized', { status: 401 });
-      if (auth.audience !== `${workerEnv.PUBLIC_ORIGIN}/mcp` || auth.clientId !== CLIENT_ID || !auth.scope?.includes(SCOPE) || (auth.expiresAt !== undefined && auth.expiresAt <= Date.now() / 1000)) return insufficientScope(auth as never, [SCOPE]);
+      if (auth.audience !== `${origin}/mcp` || auth.clientId !== CLIENT_ID || !auth.scope?.includes(SCOPE) || (auth.expiresAt !== undefined && auth.expiresAt <= Date.now() / 1000)) return insufficientScope(auth as never, [SCOPE]);
       return handleMcp(request, workerEnv);
     } },
-    defaultHandler: { async fetch(request, workerEnv) { return publicRoute(request, workerEnv); } },
+    defaultHandler: { async fetch(request, workerEnv) { return publicRoute(request, workerEnv, origin); } },
     authorizeEndpoint: '/authorize',
     tokenEndpoint: '/token',
     accessTokenTTL: 3600,
     refreshTokenTTL: 30 * 86400,
     scopesSupported: [SCOPE],
     requiredScopes: [SCOPE],
-    resourceMetadata: { resource: `${env.PUBLIC_ORIGIN}/mcp`, authorization_servers: [env.PUBLIC_ORIGIN] },
+    resourceMetadata: {
+      resource: `${origin}/mcp`,
+      authorization_servers: [origin],
+      bearer_methods_supported: ['header'],
+      resource_name: 'Skill2Plugin private Skills',
+    },
     clientIdMetadataDocumentEnabled: true,
   };
 }
 
-async function publicRoute(request: Request, env: Env): Promise<Response> {
+async function publicRoute(request: Request, env: Env, origin: string): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === '/authorize') return authorizationPage(request, env);
+  if (url.pathname === '/authorize') return authorizationPage(request, env, origin);
   if (url.pathname === '/health' && request.method === 'GET') return new Response(JSON.stringify({ status: 'ok' }), { headers: { ...safeHeaders, 'content-type': 'application/json' } });
-  if (url.pathname === '/' && request.method === 'GET') return html(`<!doctype html><html lang="zh"><meta charset="utf-8"><title>Skill2Plugin</title><h1>Skill2Plugin</h1><p>在 ChatGPT 插件设置中添加 MCP 地址 <code>${escape(env.PUBLIC_ORIGIN)}/mcp</code>，然后完成授权。</p></html>`);
+  if (url.pathname === '/' && request.method === 'GET') return html(`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Skill2Plugin</title><h1>Skill2Plugin</h1><p>在 ChatGPT 插件设置中添加 MCP 地址：</p><p><code>${escape(origin)}/mcp</code></p><p>然后完成 OAuth 授权。此实例不提供任何 MCP Tools。</p></html>`);
   return new Response('Not found', { status: 404, headers: safeHeaders });
 }
 
-async function authorizationPage(request: Request, env: Env): Promise<Response> {
-  const oauth = getOAuthApi(providerOptions(env), env);
+async function authorizationPage(request: Request, env: Env, origin: string): Promise<Response> {
+  const oauth = getOAuthApi(providerOptions(env, origin), env);
   try {
     if (request.method === 'GET') {
       if (new URL(request.url).searchParams.get('client_id') !== CLIENT_ID) return new Response('Unsupported client', { status: 400, headers: safeHeaders });
       const parsed = await oauth.parseAuthRequest(request);
-      if (parsed.clientId !== CLIENT_ID || parsed.redirectUri !== REDIRECT_URI || parsed.scope.some((scope: string) => scope !== SCOPE)) return new Response('Unsupported OAuth request', { status: 400, headers: safeHeaders });
+      if (parsed.clientId !== CLIENT_ID || parsed.redirectUri !== REDIRECT_URI || parsed.scope.length !== 1 || parsed.scope[0] !== SCOPE) return new Response('Unsupported OAuth request', { status: 400, headers: safeHeaders });
       const info = await oauth.describeConsent(parsed);
       const consent = await oauth.beginConsent(parsed);
       return html(consentHtml(info, consent.handle), consent.headers);
@@ -122,9 +128,9 @@ async function authorizationPage(request: Request, env: Env): Promise<Response> 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (!validConfiguration(env)) return new Response('Configuration incomplete', { status: 503, headers: safeHeaders });
-    if (new URL(request.url).origin !== env.PUBLIC_ORIGIN) return new Response('Origin mismatch', { status: 421, headers: safeHeaders });
+    const origin = new URL(request.url).origin;
     try {
-      const response = await new OAuthProvider<Env>(providerOptions(env)).fetch(request, env, ctx);
+      const response = await new OAuthProvider<Env>(providerOptions(env, origin)).fetch(request, env, ctx);
       const headers = new Headers(response.headers);
       for (const [key, value] of Object.entries(safeHeaders)) if (!headers.has(key)) headers.set(key, value);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
