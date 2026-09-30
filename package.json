@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "tsx scripts/build-skills.ts",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "wrangler deploy",
     "dev": "npm run build && wrangler dev",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy:local": "npm run build && wrangler deploy",
+    "check": "npm run build && npm run typecheck && npm test"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.1",
@@ -25,9 +27,9 @@
   },
   "cloudflare": {
     "bindings": {
-      "OWNER_PASSPHRASE": { "description": "A unique random passphrase of at least 32 characters to authorize your ChatGPT connection." },
-      "COOKIE_SECRET": { "description": "A separate random secret of at least 32 characters for login rate-limit keys and cookies." },
-      "PUBLIC_ORIGIN": { "description": "The exact HTTPS origin of your deployed Worker, such as https://my-worker.my-subdomain.workers.dev." }
+      "OWNER_PASSPHRASE": {
+        "description": "Set a unique random passphrase of at least 32 characters. ChatGPT will ask for it on the OAuth consent page."
+      }
     }
   }
 }
