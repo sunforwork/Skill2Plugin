@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Security Review"
+  short_description: "Review supplied code for security issues"
+  default_prompt: "Review this code snippet for concrete security issues and fixes."

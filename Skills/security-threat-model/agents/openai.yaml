@@ -1,0 +1,4 @@
+interface:
+  display_name: "Threat Modeling"
+  short_description: "Model threats from a supplied system description"
+  default_prompt: "Build a threat model for the system described below."

@@ -1,0 +1,33 @@
+{
+  "name": "skill2plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsx scripts/build-skills.ts",
+    "deploy": "npm run build && wrangler deploy",
+    "dev": "npm run build && wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.1",
+    "@zip.js/zip.js": "2.8.11",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.1",
+    "@types/node": "26.6.3",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "5.0.2",
+    "wrangler": "4.144.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "OWNER_PASSPHRASE": { "description": "A unique random passphrase of at least 32 characters to authorize your ChatGPT connection." },
+      "COOKIE_SECRET": { "description": "A separate random secret of at least 32 characters for login rate-limit keys and cookies." },
+      "PUBLIC_ORIGIN": { "description": "The exact HTTPS origin of your deployed Worker, such as https://my-worker.my-subdomain.workers.dev." }
+    }
+  }
+}
