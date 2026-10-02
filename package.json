@@ -24,12 +24,5 @@
     "typescript": "5.9.3",
     "vitest": "5.0.2",
     "wrangler": "4.144.0"
-  },
-  "cloudflare": {
-    "bindings": {
-      "OWNER_PASSPHRASE": {
-        "description": "Set a unique random passphrase of at least 32 characters. ChatGPT will ask for it on the OAuth consent page."
-      }
-    }
   }
 }

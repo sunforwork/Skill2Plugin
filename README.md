@@ -12,11 +12,11 @@ Cloudflare 的 Deploy to Cloudflare 会克隆这个**公开模板仓库**、自�
 
 1. 点击上面的 **Deploy to Cloudflare**。
 2. 选择 Cloudflare 账号和 GitHub/GitLab 账号，建议创建 **Private** 仓库。
-3. 部署页面会要求填写 `OWNER_PASSPHRASE`。使用至少 32 个字符的随机唯一口令；它会作为 Cloudflare Worker Secret 保存，不会写入部署后的 Git 仓库。
+3. 当前 OAuth 调试版不需要填写任何 Secret。
 4. 创建并部署。KV namespace 会由 Cloudflare 自动 provision，无需手工填写 namespace ID。
 5. 在 Cloudflare 新建出的私有仓库中，删除不需要的示例，把自己的 Skill 放到 `Skills/<skill-name>/`，然后 push/commit。
 6. Workers Builds 会自动重新构建和部署。打开 Worker 首页即可看到 MCP 地址：`https://<worker>.<subdomain>.workers.dev/mcp`。
-7. 在 ChatGPT 的插件设置中添加该地址，完成 OAuth 授权，并在授权页输入部署时设置的 `OWNER_PASSPHRASE`。
+7. 在 ChatGPT 的插件设置中添加该地址，身份验证选择 OAuth；当前调试版授权页只需点击“同意”。
 
 > Deploy 按钮的源模板仓库必须是公开 GitHub/GitLab 仓库；用户部署后生成的个人仓库可以设为私有。
 
@@ -45,7 +45,7 @@ Skills/
 - Skill 内容构建到 `/_content/*` Static Assets，但该路径强制先进入 Worker；匿名公网请求不会直接拿到这些文件。
 - Worker 通过内部 `ASSETS` binding 读取 Skill，再由 OAuth 保护的 `/mcp` 返回给 ChatGPT。
 - OAuth 使用 Cloudflare `@cloudflare/workers-oauth-provider`，启用 CIMD、PKCE 与 RFC 9207 issuer identification。
-- 只允许 OpenAI 的稳定 ChatGPT CIMD client：`https://chatgpt.com/oauth/client.json`，稳定回调地址为 `https://chatgpt.com/connector_platform_oauth_redirect`。
+- 接受 OpenAI 当前文档描述的 ChatGPT CIMD client 形式：`https://chatgpt.com/oauth/.../client.json`；具体 redirect URI 由该 CIMD 文档声明并由 OAuth Provider 校验。
 - MCP server 不声明任何 Tools capability；`tools/list` 返回空数组，`tools/call` 一律拒绝。
 - 登录失败会使用 KV 做短期速率限制。KV 只承载 OAuth/认证状态，不保存 Skill 正文。
 
@@ -73,7 +73,7 @@ npm test
 
 ```bash
 cp .env.example .dev.vars
-# 把 OWNER_PASSPHRASE 改成至少 32 字符的随机值
+# 当前 OAuth 调试版无需 Secret
 npm run dev
 ```
 
@@ -106,3 +106,9 @@ npm run deploy:local
 - [ ] 添加明确的开源 `LICENSE`（当前仓库尚未包含项目级许可证；示例 Skill 各自保留其原许可证）。
 - [ ] 用真实 Cloudflare Deploy Button 跑一次全新账号部署。
 - [ ] 用 ChatGPT 实测 OAuth 连接、Skill import 与更新后的重新扫描。
+
+## OAuth 调试说明
+
+当前版本暂时移除了 OWNER_PASSPHRASE，只用于定位 ChatGPT OAuth 连接问题。请勿在调试版本中放入敏感 Skill。
+
+当前重点修正：OpenAI 文档说明 CIMD client_id 是 `https://chatgpt.com/oauth/.../client.json` 这种 MCP 实例特定地址，而新插件回调是 `https://chatgpt.com/connector/oauth/{callback_id}`；旧代码硬编码了固定 client_id 和 legacy redirect URI，可能会直接拒绝合法的 ChatGPT OAuth 请求。现在改为让 OAuth Provider 校验 CIMD 文档，并只限制 client_id 必须来自 chatgpt.com 的 `/oauth/.../client.json`。

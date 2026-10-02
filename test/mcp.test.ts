@@ -6,7 +6,6 @@ function env(): Env {
   const catalog = { skills: [{ uri: 'skill://skill2plugin/demo/SKILL.md', frontmatter: { name: 'demo', description: 'Demo' }, resources: [{ uri: 'skill://skill2plugin/demo/SKILL.md', digest: 'sha256:abc', asset: '/_content/files/1', mimeType: 'text/plain; charset=utf-8' }] }] };
   const contents = new Map([['/_content/catalog.json', JSON.stringify(catalog)], ['/_content/files/1', '# Demo']]);
   return {
-    OWNER_PASSPHRASE: 'x'.repeat(32),
     OAUTH_KV: {} as KVNamespace,
     ASSETS: { fetch: async (request: Request) => new Response(contents.get(new URL(request.url).pathname), { status: contents.has(new URL(request.url).pathname) ? 200 : 404 }) } as Fetcher,
   };

@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenAI Docs"
+  short_description: "Answer with official OpenAI documentation"
+  default_prompt: "Answer my OpenAI product question with current official documentation."
