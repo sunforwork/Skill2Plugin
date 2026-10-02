@@ -1,4 +1,0 @@
-interface:
-  display_name: "PDF in Chat"
-  short_description: "Read, compare, and prepare PDF content"
-  default_prompt: "Help me review the attached PDF, including pages where layout matters."

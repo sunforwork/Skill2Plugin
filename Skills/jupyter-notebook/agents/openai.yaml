@@ -1,4 +1,0 @@
-interface:
-  display_name: "Jupyter Notebook"
-  short_description: "Create and review notebooks from supplied data"
-  default_prompt: "Create a Jupyter notebook for this experiment using the data I provide."
