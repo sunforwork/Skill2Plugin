@@ -69,38 +69,95 @@ async function publicRoute(request: Request, env: Env, origin: string): Promise<
   return new Response('Not found', { status: 404, headers: safeHeaders });
 }
 
+function cookieNames(request: Request): string[] {
+  const raw = request.headers.get('cookie');
+  if (!raw) return [];
+  return raw.split(';').map(part => part.trim().split('=')[0]).filter(Boolean);
+}
+
+function errorForLog(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { value: String(error) };
+  const record = error as Error & Record<string, unknown>;
+  return {
+    name: error.name,
+    message: error.message,
+    code: record.code,
+    description: record.description,
+    reason: record.reason,
+    detail: record.detail,
+    hasRedirect: typeof record.redirectTo === 'string',
+  };
+}
+
 async function authorizationPage(request: Request, env: Env, origin: string): Promise<Response> {
   const oauth = getOAuthApi(providerOptions(env, origin), env);
+  let stage = 'start';
   try {
     if (request.method === 'GET') {
+      stage = 'parseAuthRequest';
       const parsed = await oauth.parseAuthRequest(request);
       if (!isChatGptCimd(parsed.clientId) || parsed.scope.some((scope: string) => scope !== SCOPE)) return new Response('Unsupported OAuth request', { status: 400, headers: safeHeaders });
+      stage = 'describeConsent';
       const info = await oauth.describeConsent(parsed);
+      stage = 'beginConsent';
       const consent = await oauth.beginConsent(parsed);
-      console.log('OAuth consent started', { clientId: parsed.clientId, redirectUri: parsed.redirectUri, resource: parsed.resource, scope: parsed.scope });
+      console.log('OAuth consent started', {
+        clientId: parsed.clientId,
+        redirectUri: parsed.redirectUri,
+        resource: parsed.resource,
+        scope: parsed.scope,
+        setCookie: consent.headers.has('set-cookie'),
+      });
       return html(consentHtml(info, consent.handle), consent.headers);
     }
     if (request.method === 'POST') {
       if (!request.headers.get('content-type')?.startsWith('application/x-www-form-urlencoded')) return new Response('Invalid form', { status: 415, headers: safeHeaders });
+      stage = 'readConsentForm';
       const form = await request.formData();
       const handle = String(form.get('handle') ?? '');
+      console.log('OAuth consent POST received', {
+        decision: String(form.get('decision') ?? ''),
+        handleLength: handle.length,
+        cookieNames: cookieNames(request),
+        hasConsentCookie: cookieNames(request).some(name => name.startsWith('__Host-oauth-consent-')),
+      });
       if (form.get('decision') === 'deny') {
         const denied = await oauth.denyConsent(request, handle);
         return new Response(null, { status: 302, headers: denied.headers });
       }
       if (form.get('decision') !== 'approve') return new Response('Invalid decision', { status: 400, headers: safeHeaders });
+      stage = 'approveConsent';
       const approved = await oauth.approveConsent(request, handle, { scope: [SCOPE] });
       if (!isChatGptCimd(approved.request.clientId)) return new Response('Unsupported OAuth request', { status: 400, headers: safeHeaders });
-      const complete = await oauth.completeAuthorization({ request: approved.request, userId: 'debug-owner', metadata: { debugMode: true }, scope: [SCOPE], props: { owner: true, debugMode: true } });
+      stage = 'completeAuthorization';
+      const complete = await oauth.completeAuthorization({
+        request: approved.request,
+        userId: 'debug-owner',
+        metadata: { debugMode: true },
+        scope: approved.request.scope,
+        props: { owner: true, debugMode: true },
+      });
       console.log('OAuth authorization completed', { clientId: approved.request.clientId, redirectUri: approved.request.redirectUri, resource: approved.request.resource });
       approved.headers.set('Location', complete.redirectTo);
       return new Response(null, { status: 302, headers: approved.headers });
     }
     return new Response('Method not allowed', { status: 405, headers: { ...safeHeaders, allow: 'GET, POST' } });
   } catch (error) {
+    console.error('OAuth authorization failure', {
+      stage,
+      method: request.method,
+      path: new URL(request.url).pathname,
+      cookieNames: cookieNames(request),
+      error: errorForLog(error),
+    });
     if (error instanceof AuthorizationError && error.redirectTo) return Response.redirect(error.redirectTo, 302);
-    if (error instanceof AuthorizationError || error instanceof CimdFetchError) return new Response('Invalid or expired authorization request', { status: 400, headers: safeHeaders });
-    return new Response('Authorization unavailable', { status: 503, headers: safeHeaders });
+    if (error instanceof AuthorizationError) {
+      return new Response(`OAuth debug failure at ${stage}: ${error.description ?? error.message}`, { status: 400, headers: safeHeaders });
+    }
+    if (error instanceof CimdFetchError) {
+      return new Response(`OAuth CIMD failure at ${stage}: ${error.reason}: ${error.detail}`, { status: 400, headers: safeHeaders });
+    }
+    return new Response(`Authorization unavailable at ${stage}`, { status: 503, headers: safeHeaders });
   }
 }
 
@@ -113,7 +170,8 @@ export default {
       const headers = new Headers(response.headers);
       for (const [key, value] of Object.entries(safeHeaders)) if (!headers.has(key)) headers.set(key, value);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-    } catch {
+    } catch (error) {
+      console.error('Skill2Plugin request failed', errorForLog(error));
       return new Response('Service unavailable', { status: 503, headers: safeHeaders });
     }
   },
